@@ -189,8 +189,8 @@ class EditorWindow:
     def save_script_as(self):
         """Save script with new name"""
         filepath = filedialog.asksaveasfilename(
-            defaultextension=".ts",
-            filetypes=[("T# Scripts", "*.ts"), ("All Files", "*.*")]
+            defaultextension=".tcc",
+            filetypes=[("T# Scripts", "*.tcc"), ("All Files", "*.*")]
         )
         if filepath:
             self.script_editor.save(filepath)
