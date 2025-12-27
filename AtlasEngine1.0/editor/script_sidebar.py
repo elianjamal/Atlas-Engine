@@ -82,7 +82,7 @@ class ScriptSidebar:
         self.scripts = []
     
     def load_scripts(self, path):
-        """Load all .ts scripts from project directory"""
+        """Load all .tcc scripts from project directory"""
         self.script_list.delete(0, tk.END)
         self.scripts = []
         
@@ -91,7 +91,7 @@ class ScriptSidebar:
         
         for root, dirs, files in os.walk(path):
             for file in files:
-                if file.endswith('.ts'):
+                if file.endswith('.tcc'):
                     full_path = os.path.join(root, file)
                     self.scripts.append(full_path)
                     rel_path = os.path.relpath(full_path, path)
@@ -126,8 +126,8 @@ class ScriptSidebar:
         def create():
             name = name_entry.get().strip()
             if name:
-                if not name.endswith('.ts'):
-                    name += '.ts'
+                if not name.endswith('.tcc'):
+                    name += '.tcc'
                 
                 filepath = os.path.join(self.editor.project_path, name)
                 
