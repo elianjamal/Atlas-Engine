@@ -1,0 +1,3 @@
+"""
+AtlasEngine Editor Module
+"""
