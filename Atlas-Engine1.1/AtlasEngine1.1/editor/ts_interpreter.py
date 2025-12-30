@@ -183,6 +183,10 @@ class TSInterpreter:
             self.cmd_repeat(stmt)
         elif cmd == 'if' or cmd == 'when' or cmd == 'whenever':
             self.cmd_if(stmt)
+        elif cmd == 'elif' or cmd == 'elseif':
+            self.cmd_elseif(stmt)
+        elif cmd == 'else' or cmd == 'otherwise':
+            self.cmd_else(stmt)
         
         # Import
         elif cmd == 'callupon':
@@ -394,6 +398,45 @@ class TSInterpreter:
         elif cmd == 'swap':
             self.cmd_swap(stmt)
         elif cmd == 'increment':
+            self.cmd_increment(stmt)
+        elif cmd == 'decrement':
+            self.cmd_decrement(stmt)
+        
+        # NEW COMMANDS!
+        elif cmd == 'wait' or cmd == 'sleep' or cmd == 'pause':
+            self.cmd_wait(stmt)
+        elif cmd == 'break' or cmd == 'stop':
+            self.cmd_break(stmt)
+        elif cmd == 'continue' or cmd == 'skip':
+            self.cmd_continue(stmt)
+        elif cmd == 'return' or cmd == 'give':
+            self.cmd_return(stmt)
+        elif cmd == 'function' or cmd == 'define':
+            self.cmd_function(stmt)
+        elif cmd == 'call' or cmd == 'run':
+            self.cmd_call(stmt)
+        elif cmd == 'print' or cmd == 'log':
+            self.cmd_print(stmt)
+        elif cmd == 'error' or cmd == 'throw':
+            self.cmd_error(stmt)
+        elif cmd == 'warning' or cmd == 'warn':
+            self.cmd_warning(stmt)
+        elif cmd == 'success':
+            self.cmd_success(stmt)
+        elif cmd == 'info':
+            self.cmd_info(stmt)
+        elif cmd == 'debug':
+            self.cmd_debug(stmt)
+        elif cmd == 'comment' or cmd == 'note':
+            pass  # Comments do nothing
+        elif cmd == 'assert' or cmd == 'verify':
+            self.cmd_assert(stmt)
+        elif cmd == 'try':
+            self.cmd_try(stmt)
+        elif cmd == 'catch':
+            self.cmd_catch(stmt)
+        elif cmd == 'finally':
+            self.cmd_finally(stmt)
             self.cmd_increment(stmt)
         elif cmd == 'decrement':
             self.cmd_decrement(stmt)
@@ -957,11 +1000,12 @@ class TSInterpreter:
     # ==================== VARIABLES ====================
     
     def cmd_remember(self, stmt: str):
-        """remember name is value"""
+        """remember name as/is value"""
         patterns = [
-            r'remember\s+(\w+)\s+is\s+(.+)',
-            r'remember\s+(\w+)\s*=\s*(.+)',
-            r'remember\s+(\w+)\s*:\s*(.+)',
+            r'remember\s+(\w+)\s+as\s+(.+)',      # remember x as 5
+            r'remember\s+(\w+)\s+is\s+(.+)',      # remember x is 5
+            r'remember\s+(\w+)\s*=\s*(.+)',       # remember x = 5
+            r'remember\s+(\w+)\s*:\s*(.+)',       # remember x: 5
         ]
         for pattern in patterns:
             match = re.match(pattern, stmt, re.I)
@@ -1484,9 +1528,45 @@ class TSInterpreter:
         """Evaluate an expression"""
         expr = expr.strip().rstrip(';')
         
-        # String literal
-        if (expr.startswith('"') and expr.endswith('"')) or \
-           (expr.startswith("'") and expr.endswith("'")):
+        # Check if this is string concatenation (has + and quotes)
+        has_concat = '+' in expr and ('"' in expr or "'" in expr)
+        
+        if has_concat:
+            # Split by + but preserve strings
+            parts = []
+            current = ""
+            in_string = False
+            string_char = None
+            
+            for char in expr:
+                if char in ('"', "'"):
+                    if not in_string:
+                        in_string = True
+                        string_char = char
+                    elif char == string_char:
+                        in_string = False
+                        string_char = None
+                    current += char
+                elif char == '+' and not in_string:
+                    parts.append(current.strip())
+                    current = ""
+                else:
+                    current += char
+            
+            if current.strip():
+                parts.append(current.strip())
+            
+            # Evaluate each part and concatenate
+            result = ""
+            for part in parts:
+                val = self.eval_expr(part)  # Recursive call
+                result += str(val)
+            return result
+        
+        # String literal (single quoted string, no concatenation)
+        if (expr.startswith('"') and expr.endswith('"') and expr.count('"') == 2):
+            return expr[1:-1]
+        if (expr.startswith("'") and expr.endswith("'") and expr.count("'") == 2):
             return expr[1:-1]
         
         # List literal
@@ -1502,17 +1582,37 @@ class TSInterpreter:
         except ValueError:
             pass
         
-        # Variable
+        # Variable lookup
         if expr in self.variables:
             return self.variables[expr]
         
+        # Special expressions like "first of X"
+        if ' of ' in expr:
+            match = re.match(r'(first|last|count|length)\s+of\s+(\w+)', expr, re.I)
+            if match:
+                operation = match.group(1).lower()
+                var_name = match.group(2)
+                if var_name in self.variables:
+                    val = self.variables[var_name]
+                    if operation == 'first' and isinstance(val, (list, tuple)) and len(val) > 0:
+                        return val[0]
+                    elif operation == 'last' and isinstance(val, (list, tuple)) and len(val) > 0:
+                        return val[-1]
+                    elif operation in ('count', 'length'):
+                        return len(val) if hasattr(val, '__len__') else 0
+        
         # Math expression
         try:
-            # Replace variables
+            # Replace variables in expression
             eval_expr = expr
             for var_name, var_value in self.variables.items():
-                if var_name in eval_expr:
-                    eval_expr = eval_expr.replace(var_name, str(var_value))
+                # Use word boundaries to avoid partial replacements
+                pattern = r'\b' + re.escape(var_name) + r'\b'
+                if re.search(pattern, eval_expr):
+                    if isinstance(var_value, str):
+                        eval_expr = re.sub(pattern, f'"{var_value}"', eval_expr)
+                    else:
+                        eval_expr = re.sub(pattern, str(var_value), eval_expr)
             
             # Safe evaluation
             result = eval(eval_expr, {"__builtins__": {}}, {
@@ -1523,6 +1623,7 @@ class TSInterpreter:
             })
             return result
         except:
+            # If all else fails, return as-is
             return expr
     
     def eval_condition(self, condition: str) -> bool:
@@ -3946,6 +4047,150 @@ class TSInterpreter:
             wave_num = int(match.group(1))
             self.variables['current_wave'] = wave_num
             self.output(f"🌊 WAVE {wave_num}!", 'shout')
+    
+    # ==================== NEW COMMANDS ====================
+    
+    def cmd_wait(self, stmt: str):
+        """wait/sleep/pause for seconds"""
+        match = re.match(r'(?:wait|sleep|pause)\s+(?:for\s+)?(.+?)(?:\s+seconds?)?', stmt, re.I)
+        if match:
+            seconds = self.eval_expr(match.group(1))
+            import time
+            time.sleep(float(seconds))
+            self.log(f"⏱️ Waited {seconds} seconds")
+    
+    def cmd_break(self, stmt: str):
+        """break/stop current loop"""
+        self.loop_break = True
+        self.log("🛑 Break")
+    
+    def cmd_continue(self, stmt: str):
+        """continue/skip to next iteration"""
+        self.loop_continue = True
+        self.log("⏭️ Continue")
+    
+    def cmd_return(self, stmt: str):
+        """return/give value from function"""
+        match = re.match(r'(?:return|give)\s+(.+)', stmt, re.I)
+        if match:
+            value = self.eval_expr(match.group(1))
+            self.variables['_return'] = value
+            self.output(f"↩️ Return: {value}", 'show')
+    
+    def cmd_function(self, stmt: str):
+        """define function name { ... }"""
+        match = re.match(r'(?:function|define)\s+(\w+)\s*\{(.+?)\}', stmt, re.I | re.DOTALL)
+        if match:
+            name = match.group(1)
+            body = match.group(2)
+            self.functions[name] = body
+            self.log(f"📦 Function defined: {name}")
+    
+    def cmd_call(self, stmt: str):
+        """call/run function name"""
+        match = re.match(r'(?:call|run)\s+(\w+)', stmt, re.I)
+        if match:
+            name = match.group(1)
+            if name in self.functions:
+                self.execute(self.functions[name])
+            else:
+                self.log(f"✗ Function not found: {name}", "error")
+    
+    def cmd_print(self, stmt: str):
+        """print/log message (alias for say)"""
+        match = re.match(r'(?:print|log)\s+(.+)', stmt, re.I)
+        if match:
+            message = self.eval_expr(match.group(1))
+            self.output(str(message), 'say')
+    
+    def cmd_error(self, stmt: str):
+        """error/throw message"""
+        match = re.match(r'(?:error|throw)\s+(.+)', stmt, re.I)
+        if match:
+            message = self.eval_expr(match.group(1))
+            self.log(f"❌ ERROR: {message}", "error")
+    
+    def cmd_warning(self, stmt: str):
+        """warning/warn message"""
+        match = re.match(r'(?:warning|warn)\s+(.+)', stmt, re.I)
+        if match:
+            message = self.eval_expr(match.group(1))
+            self.log(f"⚠️ WARNING: {message}", "warning")
+    
+    def cmd_success(self, stmt: str):
+        """success message"""
+        match = re.match(r'success\s+(.+)', stmt, re.I)
+        if match:
+            message = self.eval_expr(match.group(1))
+            self.log(f"✅ SUCCESS: {message}", "success")
+    
+    def cmd_info(self, stmt: str):
+        """info message"""
+        match = re.match(r'info\s+(.+)', stmt, re.I)
+        if match:
+            message = self.eval_expr(match.group(1))
+            self.log(f"ℹ️ INFO: {message}", "info")
+    
+    def cmd_debug(self, stmt: str):
+        """debug message"""
+        match = re.match(r'debug\s+(.+)', stmt, re.I)
+        if match:
+            message = self.eval_expr(match.group(1))
+            self.log(f"🐛 DEBUG: {message}", "debug")
+    
+    def cmd_assert(self, stmt: str):
+        """assert/verify condition"""
+        match = re.match(r'(?:assert|verify)\s+(.+)', stmt, re.I)
+        if match:
+            condition = match.group(1)
+            if self.eval_condition(condition):
+                self.log(f"✅ Assert passed: {condition}", "success")
+            else:
+                self.log(f"❌ Assert failed: {condition}", "error")
+    
+    def cmd_try(self, stmt: str):
+        """try { ... } catch { ... }"""
+        match = re.match(r'try\s*\{(.+?)\}(?:\s*catch\s*\{(.+?)\})?', stmt, re.I | re.DOTALL)
+        if match:
+            try_block = match.group(1)
+            catch_block = match.group(2) if match.group(2) else None
+            
+            try:
+                statements = self.parse_code(try_block)
+                for s in statements:
+                    if s.strip():
+                        self.execute_statement(s)
+            except Exception as e:
+                if catch_block:
+                    self.variables['_error'] = str(e)
+                    statements = self.parse_code(catch_block)
+                    for s in statements:
+                        if s.strip():
+                            self.execute_statement(s)
+    
+    def cmd_catch(self, stmt: str):
+        """catch block (part of try/catch)"""
+        pass  # Handled in cmd_try
+    
+    def cmd_finally(self, stmt: str):
+        """finally block"""
+        match = re.match(r'finally\s*\{(.+?)\}', stmt, re.I | re.DOTALL)
+        if match:
+            block = match.group(1)
+            statements = self.parse_code(block)
+            for s in statements:
+                if s.strip():
+                    self.execute_statement(s)
+    
+    def cmd_else(self, stmt: str):
+        """else/otherwise { ... } (handled with if)"""
+        # This is handled in the if statement parsing
+        pass
+    
+    def cmd_elseif(self, stmt: str):
+        """elif/elseif condition { ... } (handled with if)"""
+        # This is handled in the if statement parsing
+        pass
     
     def cmd_timer(self, stmt: str):
         """timer start/stop/reset"""
